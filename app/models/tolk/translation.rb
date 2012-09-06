@@ -49,10 +49,27 @@ module Tolk
     end
 
     def value
-      if text.is_a?(String) && /^\d+$/.match(text)
-        text.to_i
-      else
-        text
+      if text.is_a?(String)
+        begin
+          utf8 = text.force_encoding('UTF-8')
+          if utf8.valid_encoding?
+            new_value = utf8
+          else
+            text.encode!('UTF-8', :invalid => :replace, :replace => "?")
+          end
+        rescue EncodingError => e
+          return ""
+        end
+
+        begin
+          if /^\d+$/.match(text)
+            text.to_i
+          else
+            text
+          end
+        rescue
+          puts "UTF-8 Error (#{locale.name}): id: #{id}: #{text}"
+        end
       end
     end
 
