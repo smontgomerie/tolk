@@ -43,6 +43,19 @@ module Tolk
         # Handle deleted phrases
         translations.present? ? Tolk::Phrase.destroy_all(["tolk_phrases.key NOT IN (?)", translations.keys]) : Tolk::Phrase.destroy_all
 
+        primary_locale_file = read_primary_locale_file
+
+        # Delete any phrases that have been given sub-keys and are now hash values rather than strings
+        if (translations.present?)
+          translations.keys.each do |key|
+            if ( primary_locale_file[key].is_a?(Hash) )
+              # Phrase was converted to a hash. Delete the original translation as it no longer exists
+              puts "#{key} is now a hash with the following values: \n#{primary_locale_file[key].to_yaml}"
+              Tolk::Phrase.destroy_all(["tolk_phrases.key IN (?)", key])
+            end
+          end
+        end
+
         phrases = Tolk::Phrase.all
 
         translations.each do |key, value|
