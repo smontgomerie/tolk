@@ -5,7 +5,8 @@ module Tolk
     scope :containing_text, lambda {|query| where("tolk_translations.text LIKE ?", "%#{query}%") }
 
     serialize :text
-    validates_presence_of :text, :if => proc {|r| r.primary.blank? && !r.explicit_nil }
+    serialize :previous_text
+    validates_presence_of :text, :if => proc {|r| r.primary.blank? && !r.explicit_nil && !r.boolean?}
     validate :check_matching_variables, :if => proc { |tr| tr.primary_translation.present? }
 
     validates_uniqueness_of :phrase_id, :scope => :locale_id
@@ -29,6 +30,10 @@ module Tolk
 
     utf8_converts :text
 
+    def boolean?
+      text.is_a?(TrueClass) || text.is_a?(FalseClass) || text == 't' || text == 'f'
+    end
+    
     def up_to_date?
       not out_of_date?
     end
@@ -47,7 +52,20 @@ module Tolk
 
     def text=(value)
       value = value.to_s if value.kind_of?(Fixnum)
-      super unless value.to_s == text
+      if primary_translation && primary_translation.boolean?
+        value = case value.to_s.downcase.strip
+        when 'true', 't'
+          true
+        when 'false', 'f'
+          false
+        else
+          self.explicit_nil = true
+          nil
+        end
+        super unless value == text
+      else
+        super unless value.to_s == text
+      end
     end
 
     def value
@@ -64,8 +82,10 @@ module Tolk
         end
 
         begin
-          if /^\d+$/.match(text)
+          if text.is_a?(String) && /^\d+$/.match(text)
             text.to_i
+          elsif (primary_translation || self).boolean?
+            %w[true t].member?(text.to_s.downcase.strip)
           else
             text
           end
@@ -76,11 +96,19 @@ module Tolk
     end
 
     def self.detect_variables(search_in)
-      case search_in
+      variables = case search_in
         when String then Set.new(search_in.scan(/\{\{(\w+)\}\}/).flatten + search_in.scan(/\%\{(\w+)\}/).flatten)
         when Array then search_in.inject(Set[]) { |carry, item| carry + detect_variables(item) }
         when Hash then search_in.values.inject(Set[]) { |carry, item| carry + detect_variables(item) }
         else Set[]
+      end
+
+      # delete special i18n variable used for pluralization itself (might not be used in all values of
+      # the pluralization keys, but is essential to use pluralization at all)
+      if search_in.is_a?(Hash) && Tolk::Locale.pluralization_data?(search_in)
+        variables.delete_if {|v| v == 'count' }
+      else
+        variables
       end
     end
 
@@ -111,7 +139,18 @@ module Tolk
           end
         end
 
-        self.text = nil if primary_translation.text.class != self.text.class
+        if primary_translation.boolean?
+          self.text = case self.text.to_s.strip
+          when 'true'
+            true
+          when 'false'
+            false
+          else
+            nil
+          end
+        elsif primary_translation.text.class != self.text.class
+          self.text = nil
+        end
       end
 
       true
@@ -129,10 +168,10 @@ module Tolk
 
     def check_matching_variables
       unless variables_match?
-        if primary_translation.variables.empty? || primary_translation.variables.class == Set
-          self.errors.add(:text, "The original does not contain variables, so they should not be included.")
+        if primary_translation.variables.empty?
+          self.errors.add(:variables, "The primary translation does not contain substitutions, so this should neither.")
         else
-          self.errors.add(:text, "The translation should contain the variables #{primary_translation.to_a.to_sentence}.")
+          self.errors.add(:variables, "The translation should contain the substitutions of the primary translation: (#{primary_translation.variables.to_a.join(', ')}), found (#{self.variables.to_a.join(', ')}).")
         end
       end
     end
