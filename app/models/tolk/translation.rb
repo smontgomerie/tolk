@@ -28,7 +28,7 @@ module Tolk
     attr_accessor :explicit_nil
     before_validation :set_explicit_nil
 
-    utf8_converts :text
+    utf8_converts :text, :previous_text
 
     def boolean?
       text.is_a?(TrueClass) || text.is_a?(FalseClass) || text == 't' || text == 'f'
